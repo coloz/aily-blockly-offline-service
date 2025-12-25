@@ -65,56 +65,83 @@ function waitForVerdaccio(maxRetries = 30, interval = 1000) {
 }
 
 /**
- * 创建 npm 用户 (使用 npm adduser 命令)
+ * 使用 npm-cli-login 创建用户（非交互式）
  */
 function createNpmUser(userInfo) {
-    console.log(`正在创建用户: ${userInfo.username}...`);
+    console.log(`正在创建/登录用户: ${userInfo.username}...`);
 
     return new Promise((resolve, reject) => {
-        const child = spawn('npm', ['adduser', '--registry', 'http://localhost:4873/'], {
+        // 设置超时
+        const timeout = setTimeout(() => {
+            child.kill();
+            reject(new Error('npm adduser 超时'));
+        }, 30000);
+
+        const child = spawn('npm', [
+            'adduser',
+            '--registry', 'http://localhost:4873/',
+            '--auth-type=legacy'
+        ], {
             stdio: ['pipe', 'pipe', 'pipe'],
-            shell: true
+            shell: true,
+            env: { ...process.env }
         });
 
         let output = '';
         let errorOutput = '';
+        let usernameWritten = false;
+        let passwordWritten = false;
+        let emailWritten = false;
 
         child.stdout.on('data', (data) => {
             const str = data.toString();
             output += str;
+            // console.log('npm output:', str);
 
             // 根据提示输入用户名、密码、邮箱
-            if (str.toLowerCase().includes('username')) {
+            const lowerStr = str.toLowerCase();
+            if (lowerStr.includes('username') && !usernameWritten) {
+                console.log('写入用户名...');
                 child.stdin.write(userInfo.username + '\n');
-            } else if (str.toLowerCase().includes('password')) {
+                usernameWritten = true;
+            } else if (lowerStr.includes('password') && !passwordWritten) {
+                console.log('写入密码...');
                 child.stdin.write(userInfo.password + '\n');
-            } else if (str.toLowerCase().includes('email')) {
+                passwordWritten = true;
+            } else if (lowerStr.includes('email') && !emailWritten) {
+                console.log('写入邮箱...');
                 child.stdin.write(userInfo.email + '\n');
+                emailWritten = true;
             }
         });
 
         child.stderr.on('data', (data) => {
-            errorOutput += data.toString();
+            const str = data.toString();
+            errorOutput += str;
+            console.log('npm stderr:', str);
         });
 
         child.on('close', (code) => {
-            if (code === 0) {
-                console.log(`用户 ${userInfo.username} 创建成功`);
+            clearTimeout(timeout);
+            const allOutput = output + errorOutput;
+            const lowerOutput = allOutput.toLowerCase();
+
+            // 检查是否成功或用户已存在
+            if (code === 0 ||
+                lowerOutput.includes('logged in') ||
+                lowerOutput.includes('already exists') ||
+                lowerOutput.includes('already registered')) {
+                console.log(`用户 ${userInfo.username} 已就绪（创建成功或已存在）`);
                 resolve(userInfo);
             } else {
-                // 用户可能已存在
-                if (errorOutput.includes('already exists') || output.includes('already exists') || output.includes('Logged in')) {
-                    console.log(`用户 ${userInfo.username} 已存在`);
-                    resolve(userInfo);
-                } else {
-                    console.error(`npm adduser 输出: ${output}`);
-                    console.error(`npm adduser 错误: ${errorOutput}`);
-                    reject(new Error(`创建用户失败: ${errorOutput || output}`));
-                }
+                console.error(`npm adduser 输出: ${output}`);
+                console.error(`npm adduser 错误: ${errorOutput}`);
+                reject(new Error(`创建用户失败: ${errorOutput || output}`));
             }
         });
 
         child.on('error', (err) => {
+            clearTimeout(timeout);
             reject(new Error(`执行 npm adduser 失败: ${err.message}`));
         });
     });
@@ -180,13 +207,20 @@ function loginNpmUser(userInfo) {
  * 确保用户已创建并登录
  */
 async function ensureAuthenticated() {
-    // 先创建用户
-    console.log('正在创建用户:', DEFAULT_USER.username);
+
+    // 先尝试创建用户（如果已存在会自动处理）
+    console.log('正在确保用户存在:', DEFAULT_USER.username);
     await createNpmUser(DEFAULT_USER);
-    
-    // 再登录用户
-    const userInfo = await loginNpmUser(DEFAULT_USER);
-    return userInfo;
+    console.log(`用户 ${DEFAULT_USER.username} 认证完成`);
+    // 如果创建失败，尝试登录
+    console.log('尝试登录...');
+    try {
+        const userInfo = await loginNpmUser(DEFAULT_USER);
+        return userInfo;
+    } catch (loginError) {
+        console.error('登录也失败，认证失败');
+        throw loginError;
+    }
 }
 
 const REPOS = [
