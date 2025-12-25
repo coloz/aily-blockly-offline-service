@@ -5,8 +5,6 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
-const url = require('url');
-const zlib = require('zlib');
 
 const verdaccioBin = path.join(__dirname, 'node_modules', '.bin', 'verdaccio.cmd');
 const configPath = path.join(__dirname, 'config.yaml');
