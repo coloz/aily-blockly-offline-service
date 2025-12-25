@@ -1,0 +1,23 @@
+{
+  "name": "aily-blockly-offline-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "bin": {
+    "aily-service": "./cli.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node start-verdaccio.js",
+    "verdaccio": "verdaccio --config config.yaml",
+    "run": "node cli.js run",
+    "stop": "node cli.js stop",
+    "status": "node cli.js status",
+    "update": "node cli.js update"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "verdaccio": "^6.2.4"
+  }
+}
