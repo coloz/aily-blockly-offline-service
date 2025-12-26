@@ -570,9 +570,8 @@ function showStatus() {
 }
 
 function runCommand(cmd, cwd, description) {
-    console.log(`\n>>> ${description}`);
-    console.log(`>>> 执行: ${cmd}`);
-    console.log(`>>> 目录: ${cwd}\n`);
+    console.log(`>>> ${description}`);
+    console.log(`>>> 目录: ${cwd}`);
     try {
         execSync(cmd, { cwd, stdio: 'inherit', shell: true });
         return true;
@@ -752,7 +751,6 @@ async function runUpdate() {
         console.log('----------------------------------------');
 
         // 1. 从 GitHub 下载 zip 并解压
-        console.log(`从 GitHub 下载: ${repo.github}`);
         const downloadSuccess = await downloadAndExtractRepo(repo, reposDir);
         if (!downloadSuccess) {
             console.error(`仓库 ${repo.name} 下载失败，跳过...`);

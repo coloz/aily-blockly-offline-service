@@ -12,15 +12,14 @@
 
 ## 环境要求
 
-- Node.js >= 14.x
-- Git
+- Node.js >= 20.x
 - Windows 操作系统（当前版本针对 Windows 优化）
 
 ## 安装
 
 ```bash
 # 克隆仓库
-git clone <repository-url>
+git clone https://github.com/ailyProject/aily-blockly-offline-service.git
 cd aily-blockly-offline-service
 
 # 安装依赖
