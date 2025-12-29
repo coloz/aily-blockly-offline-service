@@ -14,6 +14,13 @@ const reposDir = path.join(__dirname, 'repos');
 const publicDir = path.join(__dirname, 'public');
 const STATIC_SERVER_PORT = 4874;
 
+// Cloudflare R2 配置
+const CLOUDFLARE_R2_CONFIG = {
+    publicUrl: 'https://rs1.aily.pro',
+    bucket: 'ailyblockly',
+    manifestFile: 'manifest.json'  // 文件清单
+};
+
 // 默认用户信息
 const DEFAULT_USER = {
     username: 'aily-admin',
@@ -264,11 +271,13 @@ function showHelp() {
 Verdaccio 服务管理工具
 
 用法:
-  node cli.js run      启动 verdaccio 后台服务
-  node cli.js stop     停止 verdaccio 后台服务
-  node cli.js status   查看 verdaccio 服务状态
-  node cli.js update   克隆/更新仓库并发布包到本地 verdaccio
-  node cli.js help     显示帮助信息
+  node cli.js run         启动 verdaccio 后台服务
+  node cli.js stop        停止 verdaccio 后台服务
+  node cli.js status      查看 verdaccio 服务状态
+  node cli.js update      克隆/更新仓库并发布包到本地 verdaccio
+  node cli.js sync        从 Cloudflare R2 同步资源（跳过已存在的文件）
+  node cli.js sync-update 从 Cloudflare R2 强制同步资源（覆盖已有文件）
+  node cli.js help        显示帮助信息
 `);
 }
 
@@ -866,6 +875,200 @@ async function runUpdate() {
     console.log('========================================');
 }
 
+/**
+ * 发起 HTTP/HTTPS GET 请求并返回响应内容
+ */
+function httpGet(url, maxRedirects = 5) {
+    return new Promise((resolve, reject) => {
+        if (maxRedirects <= 0) {
+            reject(new Error('重定向次数过多'));
+            return;
+        }
+
+        const protocol = url.startsWith('https') ? https : http;
+
+        const request = protocol.get(url, (response) => {
+            // 处理重定向
+            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                httpGet(response.headers.location, maxRedirects - 1)
+                    .then(resolve)
+                    .catch(reject);
+                return;
+            }
+
+            if (response.statusCode !== 200) {
+                reject(new Error(`HTTP ${response.statusCode}`));
+                return;
+            }
+
+            let data = '';
+            response.on('data', chunk => data += chunk);
+            response.on('end', () => resolve(data));
+        });
+
+        request.on('error', reject);
+        request.setTimeout(30000, () => {
+            request.destroy();
+            reject(new Error('请求超时'));
+        });
+    });
+}
+
+/**
+ * 从文件清单获取文件列表
+ */
+async function fetchManifest(baseUrl, manifestFile) {
+    const manifestUrl = `${baseUrl}/${manifestFile}`;
+    console.log(`正在获取文件清单: ${manifestUrl}`);
+    
+    try {
+        const content = await httpGet(manifestUrl);
+        const manifest = JSON.parse(content);
+        
+        // 支持两种格式：
+        // 1. 直接是文件路径数组: ["file1.txt", "dir/file2.txt"]
+        // 2. 对象格式: { files: ["file1.txt", "dir/file2.txt"] }
+        if (Array.isArray(manifest)) {
+            return manifest;
+        } else if (manifest.files && Array.isArray(manifest.files)) {
+            return manifest.files;
+        } else {
+            throw new Error('清单格式无效，应为文件路径数组或包含 files 字段的对象');
+        }
+    } catch (error) {
+        if (error.message.includes('HTTP 404')) {
+            throw new Error(`文件清单不存在: ${manifestUrl}\n请在 R2 存储桶中创建 ${manifestFile} 文件`);
+        }
+        throw error;
+    }
+}
+
+/**
+ * 下载单个文件到指定路径
+ */
+function downloadFileToPath(fileUrl, destPath, maxRedirects = 5) {
+    return new Promise((resolve, reject) => {
+        if (maxRedirects <= 0) {
+            reject(new Error('重定向次数过多'));
+            return;
+        }
+
+        // 确保目标目录存在
+        const destDir = path.dirname(destPath);
+        if (!fs.existsSync(destDir)) {
+            fs.mkdirSync(destDir, { recursive: true });
+        }
+
+        const protocol = fileUrl.startsWith('https') ? https : http;
+
+        const request = protocol.get(fileUrl, (response) => {
+            // 处理重定向
+            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                downloadFileToPath(response.headers.location, destPath, maxRedirects - 1)
+                    .then(resolve)
+                    .catch(reject);
+                return;
+            }
+
+            if (response.statusCode !== 200) {
+                reject(new Error(`HTTP ${response.statusCode}`));
+                return;
+            }
+
+            const fileStream = fs.createWriteStream(destPath);
+            response.pipe(fileStream);
+
+            fileStream.on('finish', () => {
+                fileStream.close();
+                resolve(destPath);
+            });
+
+            fileStream.on('error', (err) => {
+                fs.unlink(destPath, () => { });
+                reject(err);
+            });
+        });
+
+        request.on('error', reject);
+        request.setTimeout(120000, () => {
+            request.destroy();
+            reject(new Error('下载超时'));
+        });
+    });
+}
+
+/**
+ * 从 Cloudflare R2 同步资源到本地
+ * @param {boolean} forceUpdate - 是否强制更新（覆盖已有文件）
+ */
+async function runSync(forceUpdate = false) {
+    console.log('========================================');
+    console.log('开始从 Cloudflare R2 同步资源...');
+    console.log(`公开 URL: ${CLOUDFLARE_R2_CONFIG.publicUrl}`);
+    console.log(`存储桶: ${CLOUDFLARE_R2_CONFIG.bucket}`);
+    console.log(`文件清单: ${CLOUDFLARE_R2_CONFIG.manifestFile}`);
+    console.log(`模式: ${forceUpdate ? '强制更新（覆盖已有文件）' : '增量同步（跳过已有文件）'}`);
+    console.log('========================================\n');
+
+    // 确保 public 目录存在
+    if (!fs.existsSync(publicDir)) {
+        fs.mkdirSync(publicDir, { recursive: true });
+        console.log(`创建目录: ${publicDir}`);
+    }
+
+    try {
+        // 1. 从文件清单获取文件列表
+        const files = await fetchManifest(CLOUDFLARE_R2_CONFIG.publicUrl, CLOUDFLARE_R2_CONFIG.manifestFile);
+        
+        if (files.length === 0) {
+            console.log('文件清单为空，没有文件需要下载');
+            return;
+        }
+
+        console.log(`\n共 ${files.length} 个文件在清单中...\n`);
+
+        // 2. 下载所有文件
+        let successCount = 0;
+        let skipCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < files.length; i++) {
+            const fileKey = files[i];
+            const fileUrl = `${CLOUDFLARE_R2_CONFIG.publicUrl}/${encodeURIComponent(fileKey).replace(/%2F/g, '/')}`;
+            const destPath = path.join(publicDir, fileKey);
+
+            const progress = `[${i + 1}/${files.length}]`;
+
+            // 检查文件是否已存在（非强制更新模式）
+            if (!forceUpdate && fs.existsSync(destPath)) {
+                console.log(`${progress} - ${fileKey} (已存在，跳过)`);
+                skipCount++;
+                continue;
+            }
+            
+            try {
+                await downloadFileToPath(fileUrl, destPath);
+                console.log(`${progress} ✓ ${fileKey}`);
+                successCount++;
+            } catch (error) {
+                console.error(`${progress} ✗ ${fileKey}: ${error.message}`);
+                failCount++;
+            }
+        }
+
+        console.log('\n========================================');
+        console.log('同步完成!');
+        console.log(`下载成功: ${successCount} 个文件`);
+        console.log(`已跳过: ${skipCount} 个文件`);
+        console.log(`下载失败: ${failCount} 个文件`);
+        console.log(`目标目录: ${publicDir}`);
+        console.log('========================================');
+
+    } catch (error) {
+        console.error(`同步失败: ${error.message}`);
+    }
+}
+
 // 主命令处理
 switch (command) {
     case 'run':
@@ -878,6 +1081,12 @@ switch (command) {
         break;
     case 'update':
         runUpdate();
+        break;
+    case 'sync':
+        runSync(false);
+        break;
+    case 'sync-update':
+        runSync(true);
         break;
     case 'stop':
         stopVerdaccio();

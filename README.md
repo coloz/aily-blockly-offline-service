@@ -66,6 +66,19 @@ node cli.js stop
 node cli.js status
 ```
 
+### 5. 同步云端资源
+
+```bash
+node cli.js sync
+```
+
+此命令会从 Cloudflare R2 存储桶同步资源到本地 `public` 目录。需要在 R2 存储桶根目录放置 `manifest.json` 文件清单。
+
+清单文件格式：
+```json
+["file1.txt", "dir/file2.json", "images/logo.png"]
+```
+
 ## 命令参考
 
 | 命令 | 说明 |
@@ -74,6 +87,7 @@ node cli.js status
 | `node cli.js stop` | 停止所有服务 |
 | `node cli.js status` | 查看服务运行状态 |
 | `node cli.js update` | 克隆/更新仓库并发布包到本地 Verdaccio |
+| `node cli.js sync` | 从 Cloudflare R2 同步资源到本地 |
 | `node cli.js help` | 显示帮助信息 |
 
 ## npm 脚本

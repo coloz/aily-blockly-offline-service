@@ -4,7 +4,12 @@ node_modules/
 # 资源
 repos/
 public/boards/
+public/compilers/
+public/imgs/
+public/sdk/
+public/tools/
 public/*.json
+public/wechat.jpg
 static-server.js
 # 日志
 *.log
