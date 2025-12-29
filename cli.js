@@ -290,19 +290,25 @@ function isProcessRunning(pid) {
     }
 }
 
+function readPidFile(filePath) {
+    if (!fs.existsSync(filePath)) return null;
+    const pid = parseInt(fs.readFileSync(filePath, 'utf8').trim(), 10);
+    return isNaN(pid) ? null : pid;
+}
+
 function getPid() {
-    if (fs.existsSync(pidFile)) {
-        const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
-        if (!isNaN(pid) && isProcessRunning(pid)) {
-            return pid;
-        }
-        // PID 文件存在但进程不存在，清理 PID 文件
-        fs.unlinkSync(pidFile);
-    }
+    const pid = readPidFile(pidFile);
+    if (pid && isProcessRunning(pid)) return pid;
+    // PID 文件存在但进程不存在，清理 PID 文件
+    if (pid !== null) fs.unlinkSync(pidFile);
     return null;
 }
 
 async function startVerdaccio() {
+    if (!fs.existsSync(verdaccioBin)) {
+        console.error('未找到 verdaccio 可执行文件，请先安装依赖（如运行 npm install）。');
+        return;
+    }
     const existingPid = getPid();
     if (existingPid) {
         console.log(`Verdaccio 已经在运行中 (PID: ${existingPid})`);
@@ -374,17 +380,10 @@ WshShell.Run """${verdaccioBin.replace(/\\/g, '\\\\')}""" & " --config " & """${
  * 获取静态服务器 PID
  */
 function getStaticPid() {
-    if (fs.existsSync(staticPidFile)) {
-        const pid = parseInt(fs.readFileSync(staticPidFile, 'utf8').trim());
-        // 检查进程是否存在
-        try {
-            process.kill(pid, 0);
-            return pid;
-        } catch (e) {
-            // PID 文件存在但进程不存在，清理 PID 文件
-            fs.unlinkSync(staticPidFile);
-        }
-    }
+    const pid = readPidFile(staticPidFile);
+    if (pid && isProcessRunning(pid)) return pid;
+    // PID 文件存在但进程不存在，清理 PID 文件
+    if (pid !== null) fs.unlinkSync(staticPidFile);
     return null;
 }
 
@@ -514,7 +513,6 @@ function stopVerdaccio() {
 
     try {
         // Windows 下使用 taskkill 来终止进程树
-        const { execSync } = require('child_process');
         execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
 
         // 删除 PID 文件
@@ -871,7 +869,7 @@ async function runUpdate() {
     }
 
     console.log('\n========================================');
-    console.log('udpate done!');
+    console.log('update done!');
     console.log('========================================');
 }
 
