@@ -513,7 +513,6 @@ function stopVerdaccio() {
 
     try {
         // Windows 下使用 taskkill 来终止进程树
-        const { execSync } = require('child_process');
         execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
 
         // 删除 PID 文件
