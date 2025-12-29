@@ -271,13 +271,18 @@ function showHelp() {
 Verdaccio 服务管理工具
 
 用法:
-  node cli.js run         启动 verdaccio 后台服务
-  node cli.js stop        停止 verdaccio 后台服务
-  node cli.js status      查看 verdaccio 服务状态
-  node cli.js update      克隆/更新仓库并发布包到本地 verdaccio
-  node cli.js sync        从 Cloudflare R2 同步资源（跳过已存在的文件）
-  node cli.js sync-update 从 Cloudflare R2 强制同步资源（覆盖已有文件）
-  node cli.js help        显示帮助信息
+  node cli.js run                       启动 verdaccio 后台服务
+  node cli.js stop                      停止 verdaccio 后台服务
+  node cli.js status                    查看 verdaccio 服务状态
+  node cli.js update                    克隆/更新仓库、发布包并同步资源（跳过已存在的文件）
+  node cli.js update --force            克隆/更新仓库、发布包并强制同步资源（覆盖已有文件）
+  node cli.js unpublish <包名>          从 npm 仓库中卸载指定的包
+  node cli.js unpublish <包名>@<版本>   从 npm 仓库中卸载指定版本的包
+  node cli.js help                      显示帮助信息
+
+示例:
+  node cli.js unpublish @aily/arduino_uno
+  node cli.js unpublish @aily/arduino_uno@1.0.0
 `);
 }
 
@@ -731,9 +736,10 @@ async function downloadAndExtractRepo(repo, reposDir) {
     }
 }
 
-async function runUpdate() {
+async function runUpdate(forceUpdate = false) {
     console.log('========================================');
     console.log('开始更新仓库并发布包...');
+    console.log(`资源同步模式: ${forceUpdate ? '强制更新（覆盖已有文件）' : '增量同步（跳过已有文件）'}`);
     console.log('========================================\n');
 
     // 检查 verdaccio 是否运行
@@ -852,26 +858,59 @@ async function runUpdate() {
                         const pkgVersion = pkgJson.version;
 
                         if (pkgName && pkgVersion) {
-                            // 先尝试移除已存在的版本
-                            runCommand(
-                                `npm unpublish ${pkgName}@${pkgVersion} --registry http://localhost:4873 --force`,
-                                itemPath,
-                                `移除 ${pkgName}@${pkgVersion}`
-                            );
+                            // 检查包是否已存在
+                            let packageExists = false;
+                            try {
+                                execSync(`npm view ${pkgName}@${pkgVersion} --registry http://localhost:4873`, {
+                                    stdio: 'pipe',
+                                    shell: true
+                                });
+                                packageExists = true;
+                            } catch (e) {
+                                // 包不存在，继续发布
+                                packageExists = false;
+                            }
+
+                            if (packageExists) {
+                                if (forceUpdate) {
+                                    // 强制更新模式：先移除再发布
+                                    runCommand(
+                                        `npm unpublish ${pkgName}@${pkgVersion} --registry http://localhost:4873 --force`,
+                                        itemPath,
+                                        `移除 ${pkgName}@${pkgVersion}`
+                                    );
+                                    runCommand('npm publish --registry http://localhost:4873', itemPath, `发布 ${item}`);
+                                } else {
+                                    // 非强制更新模式：跳过已存在的包
+                                    console.log(`包 ${pkgName}@${pkgVersion} 已存在，跳过发布`);
+                                }
+                            } else {
+                                // 包不存在，直接发布
+                                runCommand('npm publish --registry http://localhost:4873', itemPath, `发布 ${item}`);
+                            }
+                        } else {
+                            // 无法获取包名或版本，直接尝试发布
+                            runCommand('npm publish --registry http://localhost:4873', itemPath, `发布 ${item}`);
                         }
                     } catch (e) {
-                        console.log(`读取 package.json 失败: ${e.message}，跳过版本移除`);
+                        console.log(`读取 package.json 失败: ${e.message}，尝试直接发布`);
+                        runCommand('npm publish --registry http://localhost:4873', itemPath, `发布 ${item}`);
                     }
-
-                    // 发布包
-                    runCommand('npm publish --registry http://localhost:4873', itemPath, `发布 ${item}`);
                 }
             }
         }
     }
 
     console.log('\n========================================');
-    console.log('udpate done!');
+    console.log('仓库更新和包发布完成!');
+    console.log('========================================');
+
+    // 执行资源同步（从 Cloudflare R2 同步资源到本地）
+    console.log('\n');
+    await runSync(forceUpdate);
+
+    console.log('\n========================================');
+    console.log('update done!');
     console.log('========================================');
 }
 
@@ -1069,6 +1108,55 @@ async function runSync(forceUpdate = false) {
     }
 }
 
+/**
+ * 从 npm 仓库中卸载指定的包
+ * @param {string} packageSpec - 包名或包名@版本
+ */
+async function runUnpublish(packageSpec) {
+    if (!packageSpec) {
+        console.error('错误: 请指定要卸载的包名');
+        console.log('用法: node cli.js unpublish <包名>[@版本]');
+        console.log('示例:');
+        console.log('  node cli.js unpublish @aily/arduino_uno');
+        console.log('  node cli.js unpublish @aily/arduino_uno@1.0.0');
+        return;
+    }
+
+    console.log('========================================');
+    console.log(`准备从 npm 仓库中卸载包: ${packageSpec}`);
+    console.log('========================================\n');
+
+    // 检查 verdaccio 是否运行
+    console.log('检查 Verdaccio 服务状态...');
+    try {
+        await waitForVerdaccio(10, 1000);
+        console.log('Verdaccio 服务已就绪');
+    } catch (error) {
+        console.error('Verdaccio 服务未运行，请先执行: node cli.js run');
+        return;
+    }
+
+    // 执行 unpublish 命令
+    try {
+        console.log(`\n正在卸载: ${packageSpec}...`);
+        execSync(`npm unpublish ${packageSpec} --registry http://localhost:4873 --force`, {
+            stdio: 'inherit',
+            shell: true
+        });
+        console.log(`\n✓ 包 ${packageSpec} 已成功从仓库中卸载`);
+    } catch (error) {
+        console.error(`\n✗ 卸载失败: ${error.message}`);
+        console.log('\n可能的原因:');
+        console.log('  1. 包名不存在');
+        console.log('  2. 指定的版本不存在');
+        console.log('  3. 没有足够的权限');
+    }
+
+    console.log('\n========================================');
+    console.log('unpublish 操作完成');
+    console.log('========================================');
+}
+
 // 主命令处理
 switch (command) {
     case 'run':
@@ -1080,13 +1168,12 @@ switch (command) {
         })();
         break;
     case 'update':
-        runUpdate();
+        // 检查是否有 --force 参数
+        const forceUpdate = args.includes('--force') || args.includes('-f');
+        runUpdate(forceUpdate);
         break;
-    case 'sync':
-        runSync(false);
-        break;
-    case 'sync-update':
-        runSync(true);
+    case 'unpublish':
+        runUnpublish(subCommand);
         break;
     case 'stop':
         stopVerdaccio();

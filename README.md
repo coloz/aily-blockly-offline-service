@@ -53,6 +53,7 @@ node cli.js update
    - `aily-project-sdks` - SDK
 2. 执行仓库中配置的构建命令
 3. 将所有包发布到本地 Verdaccio
+4. 从 Cloudflare R2 同步资源到本地 `public` 目录
 
 ### 3. 停止服务
 
@@ -66,19 +67,6 @@ node cli.js stop
 node cli.js status
 ```
 
-### 5. 同步云端资源
-
-```bash
-node cli.js sync
-```
-
-此命令会从 Cloudflare R2 存储桶同步资源到本地 `public` 目录。需要在 R2 存储桶根目录放置 `manifest.json` 文件清单。
-
-清单文件格式：
-```json
-["file1.txt", "dir/file2.json", "images/logo.png"]
-```
-
 ## 命令参考
 
 | 命令 | 说明 |
@@ -86,9 +74,10 @@ node cli.js sync
 | `node cli.js run` | 启动 Verdaccio 和静态文件服务器 |
 | `node cli.js stop` | 停止所有服务 |
 | `node cli.js status` | 查看服务运行状态 |
-| `node cli.js update` | 克隆/更新仓库并发布包到本地 Verdaccio |
-| `node cli.js sync` | 从 Cloudflare R2 同步资源到本地 |
-| `node cli.js sync update` | 从 Cloudflare R2 强制同步资源（覆盖已有文件） |
+| `node cli.js update` | 克隆/更新仓库、发布包并同步云端资源（跳过已存在文件） |
+| `node cli.js update --force` | 克隆/更新仓库、发布包并强制同步所有云端资源（覆盖已有文件） |
+| `node cli.js unpublish <包名>` | 从 npm 仓库中卸载指定的包（所有版本） |
+| `node cli.js unpublish <包名>@<版本>` | 从 npm 仓库中卸载指定版本的包 |
 | `node cli.js help` | 显示帮助信息 |
 
 ## npm 脚本
