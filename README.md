@@ -88,6 +88,7 @@ node cli.js sync
 | `node cli.js status` | 查看服务运行状态 |
 | `node cli.js update` | 克隆/更新仓库并发布包到本地 Verdaccio |
 | `node cli.js sync` | 从 Cloudflare R2 同步资源到本地 |
+| `node cli.js sync update` | 从 Cloudflare R2 强制同步资源（覆盖已有文件） |
 | `node cli.js help` | 显示帮助信息 |
 
 ## npm 脚本
