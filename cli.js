@@ -809,8 +809,8 @@ async function runUpdate(forceUpdate = false) {
 
         // 2.6 对于 aily-blockly-boards，复制各包的 board.webp 到 public/boards/<name>/board.webp
         if (repo.name === 'aily-blockly-boards') {
-            console.log('\n>>> 复制开发板图片到 public/boards 目录...');
-            const boardsPublicDir = path.join(publicDir, 'boards');
+            console.log('\n>>> 复制开发板图片到 public/imgs/boards 目录...');
+            const boardsPublicDir = path.join(publicDir, 'imgs', 'boards');
             if (!fs.existsSync(boardsPublicDir)) {
                 fs.mkdirSync(boardsPublicDir, { recursive: true });
             }
